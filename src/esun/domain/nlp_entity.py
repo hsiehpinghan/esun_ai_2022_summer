@@ -31,15 +31,33 @@ class NlpEntity(AbstractEntity):
         super().__init__(id=Id(value=id))
         self._sentence_list = sentence_list
         self._batch_size = batch_size
+        self.get_sorted_text_objs_func = np.vectorize(pyfunc=self._get_sorted_text_objs,
+                                                      signature='(),(n),()->()')
 
     def get_answer(self) -> str:
-        sorted_text_objs = self._get_sorted_text_objs(model=self._models[0],
-                                                      texts=self._sentence_list,
-                                                      token_id_mapping=NlpEntity._token_id_mapping)
-        answer = sorted_text_objs[0]['text']
+        sorted_text_objs_list = self.get_sorted_text_objs_func(model=self._models,
+                                                               texts=self._sentence_list,
+                                                               token_id_mapping=NlpEntity._token_id_mapping)
+        text_correct_probs_mapping = {}
+        for sorted_text_objs in sorted_text_objs_list:
+            for sorted_text_obj in sorted_text_objs:
+                text = sorted_text_obj['text']
+                text_correct_prob = sorted_text_obj['text_correct_prob']
+                if text not in text_correct_probs_mapping:
+                    text_correct_probs_mapping[text] = []
+                text_correct_probs_mapping[text].append(text_correct_prob)
+        #answer = sorted_text_objs[0]['text']
+        text_average_correct_prob_mapping = {text: np.average(
+            a=text_correct_probs_mapping[text]) for text in text_correct_probs_mapping}
+
+        answer = sorted(text_average_correct_prob_mapping.items(),
+                        key=lambda x: x[1],
+                        reverse=True)[0][0]
+
         return answer
 
     def _get_sorted_text_objs(self, model, texts, token_id_mapping):
+        print(len(texts))
         text_objs = self._convert_to_text_objs_func(text=texts)
         self._add_masked_infos_func(text_obj=text_objs)
         masked_texts = self._get_masked_texts(text_objs=text_objs)
@@ -73,7 +91,7 @@ class NlpEntity(AbstractEntity):
                                          masked_text_probs_mapping=masked_text_probs_mapping,
                                          token_id_mapping=token_id_mapping)
         sorted_text_objs = sorted(text_objs,
-                                  key=lambda text_obj: text_obj['text_correct_probs'],
+                                  key=lambda text_obj: text_obj['text_correct_prob'],
                                   reverse=True)
         return sorted_text_objs
 

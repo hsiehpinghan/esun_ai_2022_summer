@@ -43,7 +43,7 @@ class Util:
             char_correct_probs = add_and_return_char_correct_prob_func(masked_info=text_obj['masked_infos'],
                                                                        masked_text_probs_mapping=masked_text_probs_mapping,
                                                                        token_id_mapping=token_id_mapping)
-            text_obj['text_correct_probs'] = np.average(a=char_correct_probs)
+            text_obj['text_correct_prob'] = np.average(a=char_correct_probs)
 
         add_text_correct_prob_func = np.vectorize(pyfunc=add_text_correct_prob,
                                                   signature='(),(),()->()')
