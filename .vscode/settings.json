@@ -1,0 +1,30 @@
+{
+    "editor.formatOnSave": true,
+    "terminal.integrated.env.linux": {
+        "PYTHONPATH": "src",
+        "CAPTAIN_EMAIL": "thank.hsiehpinghan@gmail.com",
+        "SALT": "671224",
+        "MODEL_DIR": "/home/hsiehpinghan/git/esun_ai_2022_summer/model"
+    },
+    "terminal.integrated.env.windows": {
+        "PYTHONPATH": "src",
+        "CAPTAIN_EMAIL": "thank.hsiehpinghan@gmail.com",
+        "SALT": "671224",
+        "MODEL_DIR": "/home/hsiehpinghan/git/esun_ai_2022_summer/model"
+    },
+    "terminal.integrated.env.osx": {
+        "PYTHONPATH": "src",
+        "CAPTAIN_EMAIL": "thank.hsiehpinghan@gmail.com",
+        "SALT": "671224",
+        "MODEL_DIR": "/home/hsiehpinghan/git/esun_ai_2022_summer/model"
+    },
+    "python.testing.pytestArgs": [
+        "-s",
+        "tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.nosetestsEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "python.terminal.activateEnvInCurrentTerminal": true,
+    "python.pythonPath": "/home/hsiehpinghan/miniconda3/envs/esun_ai_2022_summer/bin/python"
+}
