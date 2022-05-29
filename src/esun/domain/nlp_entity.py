@@ -1,3 +1,4 @@
+import re
 import torch
 import numpy as np
 
@@ -38,7 +39,7 @@ class NlpEntity(AbstractEntity):
                                                             signature='(),(n)->()')
 
     def get_answer(self) -> str:
-        sentence_list = [sentence.replace(' ', '')
+        sentence_list = [self._sentence_cleaning(sentence=sentence)
                          for sentence in self._sentence_list]
         similar_text_objs = self._get_similar_text_objs(
             sentence_list=sentence_list)
@@ -68,8 +69,9 @@ class NlpEntity(AbstractEntity):
         return answer
 
     def get_answer_v2(self) -> str:
-        sentence_list = [sentence.replace(' ', '')
+        sentence_list = [self._sentence_cleaning(sentence=sentence)
                          for sentence in self._sentence_list]
+
         similar_text_objs = self._get_similar_text_objs(
             sentence_list=sentence_list)
         if len(similar_text_objs) > 0:
@@ -86,6 +88,11 @@ class NlpEntity(AbstractEntity):
                         key=lambda x: np.average(a=x[1]),
                         reverse=True)[0][0]
         return answer
+
+    def _sentence_cleaning(self, sentence):
+        return re.sub(pattern='([^\u4e00-\u9fa5])+',
+                      repl='',
+                      string=sentence)
 
     def _get_most_likely_sentences(self, model, similar_text_objs):
         most_likely_sentences = []
@@ -269,15 +276,15 @@ class NlpEntity(AbstractEntity):
 
 if __name__ == '__main__':
     nlp_entity = NlpEntity(id='my_id',
-                           sentence_list=['轉客服轉接客服接信用卡專員',
-                                          '轉克服轉接克服接信用卡專員',
-                                          '轉客服轉接客服直接信用卡專員',
-                                          '轉客服轉接客服轉接信用卡專員',
-                                          '轉克服轉接客服轉接信用卡專員',
-                                          '轉克服轉接客服的轉接信用卡專員',
-                                          '我轉客服轉接客服轉接信用卡專員',
-                                          '轉客服轉接客服的轉接信用卡專員',
-                                          '轉客服轉接客服轉接到信用卡專員',
-                                          '我轉客服轉接客服的轉接信用卡專員'])
+                           sentence_list=['深受 台灣 人 支持 遇襲案',
+                                          '深受 台灣 人 支持 御璽 按',
+                                          '深受 台灣 人 支持 玉璽 按',
+                                          '深受 台灣人 支持 遇襲案',
+                                          '深受 台灣人 支持 御璽 按',
+                                          '深受 台灣 人 支持 與 see 按',
+                                          '深受 臺灣人 支持 遇襲案',
+                                          '深受 臺灣人 支持 御璽 按',
+                                          '深受 台灣 人 支持 與 c 按',
+                                          '深受 台灣 人 支持 御璽 案'])
     answer = nlp_entity.get_answer_v2()
     print(answer)

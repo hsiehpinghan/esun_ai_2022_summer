@@ -1,7 +1,7 @@
 import abc
-import typing
 
 from esun.domain.abstract_value_object import AbstractValueObject
+
 
 class AbstractId(AbstractValueObject):
 
