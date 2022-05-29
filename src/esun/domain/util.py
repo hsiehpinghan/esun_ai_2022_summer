@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import torch
 import numpy as np
 
@@ -58,10 +59,26 @@ class Util:
         return models
 
     @classmethod
+    def get_is_char_equal_func(cls):
+        def is_char_equal(char_0, char_1):
+            return 1 if char_0 == char_1 else 0
+
+        is_char_equal_func = np.vectorize(pyfunc=is_char_equal,
+                                          signature='(),()->()')
+        return is_char_equal_func
+
+    @classmethod
     def get_token_id_mapping(cls):
         tokenizer = AutoTokenizer.from_pretrained(
             pretrained_model_name_or_path=os.path.join(os.environ['MODEL_DIR'], '0'))
         return tokenizer.get_vocab()
+
+    @classmethod
+    def get_char_to_similarity_bert_ids(cls):
+        with open(file=os.path.join(os.environ['DATA_DIR'], 'char_to_similarity_bert_ids.json'),
+                  mode='r') as f:
+            char_to_similarity_bert_ids = json.load(fp=f)
+        return char_to_similarity_bert_ids
 
     @classmethod
     def get_get_probs_func(cls):
