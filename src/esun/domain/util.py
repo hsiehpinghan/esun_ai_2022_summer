@@ -4,6 +4,7 @@ import json
 import torch
 import numpy as np
 
+from absl import logging
 from transformers import AutoTokenizer
 from transformers import ElectraForMaskedLM
 from scipy.special import softmax
@@ -54,6 +55,8 @@ class Util:
     @classmethod
     def get_models(cls):
         device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+        logging.set_verbosity(logging.INFO)
+        logging.info(f'using device({device}).')
         models = [ElectraForMaskedLM.from_pretrained(pretrained_model_name_or_path=os.path.join(
             os.environ['MODEL_DIR'], str(i))).to(device) for i in range(5)]
         return models
