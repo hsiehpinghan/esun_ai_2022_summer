@@ -35,7 +35,7 @@ class NlpEntity(AbstractEntity):
         self._get_sorted_text_objs_func = np.vectorize(pyfunc=self._get_sorted_text_objs,
                                                        signature='(),(n),()->()')
         self._get_most_likely_sentences_func = np.vectorize(pyfunc=self._get_most_likely_sentences,
-                                                            signature='(),(n)->(n)')
+                                                            signature='(),(n)->()')
 
     def get_answer(self) -> str:
         sentence_list = [sentence.replace(' ', '')
@@ -75,7 +75,17 @@ class NlpEntity(AbstractEntity):
         if len(similar_text_objs) > 0:
             most_likely_sentences_list = self._get_most_likely_sentences_func(model=self._models,
                                                                               similar_text_objs=similar_text_objs)
-        return most_likely_sentences_list
+        answers = {}
+        for most_likely_sentences in most_likely_sentences_list:
+            for most_likely_sentence in most_likely_sentences:
+                if most_likely_sentence not in answers:
+                    answers[most_likely_sentence] = []
+                most_likely_sentence_prob = most_likely_sentences[most_likely_sentence]
+                answers[most_likely_sentence].append(most_likely_sentence_prob)
+        answer = sorted(answers.items(),
+                        key=lambda x: np.average(a=x[1]),
+                        reverse=True)[0][0]
+        return answer
 
     def _get_most_likely_sentences(self, model, similar_text_objs):
         most_likely_sentences = []
@@ -97,10 +107,11 @@ class NlpEntity(AbstractEntity):
                               for similar_text_obj in similar_text_objs]
         assert len(logits_list) == len(bert_ids_list_list)
         probs_list_list = softmax(x=logits_list)
-        most_likely_sentences = []
+        most_likely_sentences = {}
         for (probs_list, bert_ids_list) in zip(probs_list_list, bert_ids_list_list):
             # len(probs_list) / len(bert_ids_list): 17 / 13
             best_bert_ids = []
+            best_bert_id_probs = []
             for i in range(len(bert_ids_list)):
                 bert_ids = bert_ids_list[i]
                 bert_ids_probs = np.take(a=probs_list[i+1],
@@ -108,35 +119,12 @@ class NlpEntity(AbstractEntity):
                 best_bert_id_index = np.argmax(a=bert_ids_probs)
                 best_bert_id = bert_ids[best_bert_id_index]
                 best_bert_ids.append(best_bert_id)
-            most_likely_sentences.append(self._tokenizer.decode(token_ids=best_bert_ids,
-                                                                skip_special_tokens=True).replace(' ', ''))
-        return np.array(most_likely_sentences)
-
-        """
-        mask_positions_list = []
-        for inp_ids in input_ids:
-            mask_positions = self._get_mask_positions(input_ids=inp_ids)
-            mask_positions_list.append(mask_positions)
-        assert len(input_ids) == len(logits_list) == len(
-            mask_positions_list) == len(similar_text_objs)
-        for (inp_ids, logits, mask_positions, similar_text_obj) in zip(input_ids, logits_list, mask_positions_list, similar_text_objs):
-            probs_list = self._get_probs_list(logits, mask_positions)
-            assert len(mask_positions) == len(probs_list) == len(
-                similar_text_obj['similarity_bert_ids_list'])
-            for (mask_position, probs, similarity_bert_ids) in zip(mask_positions, probs_list, similar_text_obj['similarity_bert_ids_list']):
-                if len(similarity_bert_ids) > 0:
-                    similarity_bert_ids_probs = np.take(a=probs,
-                                                        indices=similarity_bert_ids)
-                    most_similarity_index = np.argmax(
-                        a=similarity_bert_ids_probs)
-                    most_similarity_bert_id = similarity_bert_ids[most_similarity_index]
-                else:
-                    most_similarity_bert_id = self._tokenizer.unk_token_id
-                inp_ids[mask_position] = most_similarity_bert_id
-            most_likely_sentences.append(self._tokenizer.decode(token_ids=inp_ids,
-                                                                skip_special_tokens=True).replace(' ', ''))
-        return np.array(most_likely_sentences)
-        """
+                best_bert_id_prob = bert_ids_probs[best_bert_id_index]
+                best_bert_id_probs.append(best_bert_id_prob)
+            sentence = self._tokenizer.decode(token_ids=best_bert_ids,
+                                              skip_special_tokens=True).replace(' ', '')
+            most_likely_sentences[sentence] = np.average(a=best_bert_id_probs)
+        return most_likely_sentences
 
     def _get_probs_list(self, logits, mask_positions):
         probs_list = []
