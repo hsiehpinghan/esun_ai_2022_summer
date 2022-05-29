@@ -1,4 +1,3 @@
-import re
 import torch
 import numpy as np
 
@@ -36,10 +35,10 @@ class NlpEntity(AbstractEntity):
         self._get_sorted_text_objs_func = np.vectorize(pyfunc=self._get_sorted_text_objs,
                                                        signature='(),(n),()->()')
         self._get_most_likely_sentences_func = np.vectorize(pyfunc=self._get_most_likely_sentences,
-                                                            signature='(),(n)->()')
+                                                            signature='(),(n)->(n)')
 
     def get_answer(self) -> str:
-        sentence_list = [self._sentence_cleaning(sentence=sentence)
+        sentence_list = [sentence.replace(' ', '')
                          for sentence in self._sentence_list]
         similar_text_objs = self._get_similar_text_objs(
             sentence_list=sentence_list)
@@ -68,32 +67,6 @@ class NlpEntity(AbstractEntity):
 
         return answer
 
-    def get_answer_v2(self) -> str:
-        sentence_list = [self._sentence_cleaning(sentence=sentence)
-                         for sentence in self._sentence_list]
-
-        similar_text_objs = self._get_similar_text_objs(
-            sentence_list=sentence_list)
-        if len(similar_text_objs) > 0:
-            most_likely_sentences_list = self._get_most_likely_sentences_func(model=self._models,
-                                                                              similar_text_objs=similar_text_objs)
-        answers = {}
-        for most_likely_sentences in most_likely_sentences_list:
-            for most_likely_sentence in most_likely_sentences:
-                if most_likely_sentence not in answers:
-                    answers[most_likely_sentence] = []
-                most_likely_sentence_prob = most_likely_sentences[most_likely_sentence]
-                answers[most_likely_sentence].append(most_likely_sentence_prob)
-        answer = sorted(answers.items(),
-                        key=lambda x: np.average(a=x[1]),
-                        reverse=True)[0][0]
-        return answer
-
-    def _sentence_cleaning(self, sentence):
-        return re.sub(pattern='([^\u4e00-\u9fa5])+',
-                      repl='',
-                      string=sentence)
-
     def _get_most_likely_sentences(self, model, similar_text_objs):
         most_likely_sentences = []
         masked_sentences = [similar_text_obj['masked_sentence']
@@ -109,29 +82,30 @@ class NlpEntity(AbstractEntity):
         (_, logits_list) = outputs[:]
         input_ids = input_ids.cpu()
         attention_mask = attention_mask.cpu()
-        logits_list = logits_list.cpu().numpy()  # shape: (3, 17, 21128)
-        bert_ids_list_list = [similar_text_obj['bert_ids_list']
-                              for similar_text_obj in similar_text_objs]
-        assert len(logits_list) == len(bert_ids_list_list)
-        probs_list_list = softmax(x=logits_list)
-        most_likely_sentences = {}
-        for (probs_list, bert_ids_list) in zip(probs_list_list, bert_ids_list_list):
-            # len(probs_list) / len(bert_ids_list): 17 / 13
-            best_bert_ids = []
-            best_bert_id_probs = []
-            for i in range(len(bert_ids_list)):
-                bert_ids = bert_ids_list[i]
-                bert_ids_probs = np.take(a=probs_list[i+1],
-                                         indices=bert_ids)
-                best_bert_id_index = np.argmax(a=bert_ids_probs)
-                best_bert_id = bert_ids[best_bert_id_index]
-                best_bert_ids.append(best_bert_id)
-                best_bert_id_prob = bert_ids_probs[best_bert_id_index]
-                best_bert_id_probs.append(best_bert_id_prob)
-            sentence = self._tokenizer.decode(token_ids=best_bert_ids,
-                                              skip_special_tokens=True).replace(' ', '')
-            most_likely_sentences[sentence] = np.average(a=best_bert_id_probs)
-        return most_likely_sentences
+        logits_list = logits_list.cpu().numpy()
+        mask_positions_list = []
+        for inp_ids in input_ids:
+            mask_positions = self._get_mask_positions(input_ids=inp_ids)
+            mask_positions_list.append(mask_positions)
+        assert len(input_ids) == len(logits_list) == len(
+            mask_positions_list) == len(similar_text_objs)
+        for (inp_ids, logits, mask_positions, similar_text_obj) in zip(input_ids, logits_list, mask_positions_list, similar_text_objs):
+            probs_list = self._get_probs_list(logits, mask_positions)
+            assert len(mask_positions) == len(probs_list) == len(
+                similar_text_obj['similarity_bert_ids_list'])
+            for (mask_position, probs, similarity_bert_ids) in zip(mask_positions, probs_list, similar_text_obj['similarity_bert_ids_list']):
+                if len(similarity_bert_ids) > 0:
+                    similarity_bert_ids_probs = np.take(a=probs,
+                                                        indices=similarity_bert_ids)
+                    most_similarity_index = np.argmax(
+                        a=similarity_bert_ids_probs)
+                    most_similarity_bert_id = similarity_bert_ids[most_similarity_index]
+                else:
+                    most_similarity_bert_id = self._tokenizer.unk_token_id
+                inp_ids[mask_position] = most_similarity_bert_id
+            most_likely_sentences.append(self._tokenizer.decode(token_ids=inp_ids,
+                                                                skip_special_tokens=True).replace(' ', ''))
+        return np.array(most_likely_sentences)
 
     def _get_probs_list(self, logits, mask_positions):
         probs_list = []
@@ -148,18 +122,18 @@ class NlpEntity(AbstractEntity):
         for sentence in sentence_list:
             sentences_dict[len(sentence)].append(sentence)
         sentences_list = sentences_dict.values()
-        # filter len > 1
-        # sentences_list = [
-        #    sentences for sentences in sentences_list if len(sentences) > 1]
+        # filter len < 0
+        sentences_list = [
+            sentences for sentences in sentences_list if len(sentences) > 1]
         # split list if different too much
         sentences_list_similar = []
         for sentences in sentences_list:
             sentences_list_similar += self._split_list_if_different_too_much(
                 sentences=sentences)
-        # filter len > 1
+        # filter len < 0
         similar_text_objs = []
-        # sentences_list_similar = [
-        #    sentences for sentences in sentences_list_similar if len(sentences) > 1]
+        sentences_list_similar = [
+            sentences for sentences in sentences_list_similar if len(sentences) > 1]
         for sentences_similar in sentences_list_similar:
             similar_text_obj = self._get_similar_text_obj(
                 sentences=sentences_similar)
@@ -168,22 +142,20 @@ class NlpEntity(AbstractEntity):
 
     def _get_similar_text_obj(self, sentences):
         masked_sentence = []
-        bert_ids_list = []
+        similarity_bert_ids_list = []
         sent = [list(sentence) for sentence in sentences]
         arr = np.array(sent)
         for (i, char_) in enumerate(arr[0]):
             if np.all(arr[:, i] == char_):
                 masked_sentence.append(char_)
-                bert_ids = self._get_bert_ids(char_)
-                bert_ids_list.append(bert_ids)
             else:
-                masked_sentence.append('[MASK]')
                 similarity_bert_ids = self._get_similarity_bert_ids(
                     chars=arr[:, i])
-                bert_ids_list.append(similarity_bert_ids)
+                similarity_bert_ids_list.append(similarity_bert_ids)
+                masked_sentence.append('[MASK]')
         return {'sentences': sentences,
                 'masked_sentence': ''.join(masked_sentence),
-                'bert_ids_list': bert_ids_list}
+                'similarity_bert_ids_list': similarity_bert_ids_list}
 
     def _get_similarity_bert_ids(self, chars):
         similarity_bert_ids = set()
@@ -193,17 +165,6 @@ class NlpEntity(AbstractEntity):
             similarity_bert_ids.update(
                 self._char_to_similarity_bert_ids[char_])
         return list(similarity_bert_ids)
-
-    def _get_bert_ids(self, char):
-        bert_ids = []
-        if char in self._token_id_mapping:
-            bert_ids.append(self._token_id_mapping.get(char))
-        char_tmp = f'##{char}'
-        if char_tmp in self._token_id_mapping:
-            bert_ids.append(self._token_id_mapping.get(char_tmp))
-        if len(bert_ids) <= 0:
-            bert_ids.append(self._tokenizer.unk_token_id)
-        return bert_ids
 
     def _split_list_if_different_too_much(self, sentences):
         result = []
@@ -276,15 +237,15 @@ class NlpEntity(AbstractEntity):
 
 if __name__ == '__main__':
     nlp_entity = NlpEntity(id='my_id',
-                           sentence_list=['深受 台灣 人 支持 遇襲案',
-                                          '深受 台灣 人 支持 御璽 按',
-                                          '深受 台灣 人 支持 玉璽 按',
-                                          '深受 台灣人 支持 遇襲案',
-                                          '深受 台灣人 支持 御璽 按',
-                                          '深受 台灣 人 支持 與 see 按',
-                                          '深受 臺灣人 支持 遇襲案',
-                                          '深受 臺灣人 支持 御璽 按',
-                                          '深受 台灣 人 支持 與 c 按',
-                                          '深受 台灣 人 支持 御璽 案'])
-    answer = nlp_entity.get_answer_v2()
+                           sentence_list=['轉客服轉接客服接信用卡專員',
+                                          '轉克服轉接克服接信用卡專員',
+                                          '轉客服轉接客服直接信用卡專員',
+                                          '轉客服轉接客服轉接信用卡專員',
+                                          '轉克服轉接客服轉接信用卡專員',
+                                          '轉克服轉接客服的轉接信用卡專員',
+                                          '我轉客服轉接客服轉接信用卡專員',
+                                          '轉客服轉接客服的轉接信用卡專員',
+                                          '轉客服轉接客服轉接到信用卡專員',
+                                          '我轉客服轉接客服的轉接信用卡專員'])
+    answer = nlp_entity.get_answer()
     print(answer)
