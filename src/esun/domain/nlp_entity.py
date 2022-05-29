@@ -141,18 +141,18 @@ class NlpEntity(AbstractEntity):
         for sentence in sentence_list:
             sentences_dict[len(sentence)].append(sentence)
         sentences_list = sentences_dict.values()
-        # filter len < 0
-        sentences_list = [
-            sentences for sentences in sentences_list if len(sentences) > 1]
+        # filter len > 1
+        # sentences_list = [
+        #    sentences for sentences in sentences_list if len(sentences) > 1]
         # split list if different too much
         sentences_list_similar = []
         for sentences in sentences_list:
             sentences_list_similar += self._split_list_if_different_too_much(
                 sentences=sentences)
-        # filter len < 0
+        # filter len > 1
         similar_text_objs = []
-        sentences_list_similar = [
-            sentences for sentences in sentences_list_similar if len(sentences) > 1]
+        # sentences_list_similar = [
+        #    sentences for sentences in sentences_list_similar if len(sentences) > 1]
         for sentences_similar in sentences_list_similar:
             similar_text_obj = self._get_similar_text_obj(
                 sentences=sentences_similar)
