@@ -86,7 +86,7 @@ docker run --name esun_ai_2022_summer \
 curl -v -X POST -H "Content-Type: application/json" -d @/home/hsiehpinghan/git/esun_ai_2022_summer/data/request.json http://localhost:10180/inference -w %{time_connect}:%{time_starttransfer}:%{time_total}
 
 # run gcp container
-## GPU type: NVIDIA Tesla T4
+## GPU type: NVIDIA Tesla P100
 ## Machine type: n1-standard-4 (4 vCPU, 15 GB memory)
 ## enable docker gpu (https://www.howtogeek.com/devops/how-to-use-an-nvidia-gpu-with-docker-containers/)
 sudo docker run --rm --gpus all nvidia/cuda:11.0.3-base-ubuntu20.04 nvidia-smi

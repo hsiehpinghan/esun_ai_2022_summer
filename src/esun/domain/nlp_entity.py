@@ -67,6 +67,16 @@ class NlpEntity(AbstractEntity):
 
         return answer
 
+    def get_answer_v2(self) -> str:
+        sentence_list = [sentence.replace(' ', '')
+                         for sentence in self._sentence_list]
+        similar_text_objs = self._get_similar_text_objs(
+            sentence_list=sentence_list)
+        if len(similar_text_objs) > 0:
+            most_likely_sentences_list = self._get_most_likely_sentences_func(model=self._models,
+                                                                              similar_text_objs=similar_text_objs)
+        return most_likely_sentences_list
+
     def _get_most_likely_sentences(self, model, similar_text_objs):
         most_likely_sentences = []
         masked_sentences = [similar_text_obj['masked_sentence']
@@ -82,7 +92,27 @@ class NlpEntity(AbstractEntity):
         (_, logits_list) = outputs[:]
         input_ids = input_ids.cpu()
         attention_mask = attention_mask.cpu()
-        logits_list = logits_list.cpu().numpy()
+        logits_list = logits_list.cpu().numpy()  # shape: (3, 17, 21128)
+        bert_ids_list_list = [similar_text_obj['bert_ids_list']
+                              for similar_text_obj in similar_text_objs]
+        assert len(logits_list) == len(bert_ids_list_list)
+        probs_list_list = softmax(x=logits_list)
+        most_likely_sentences = []
+        for (probs_list, bert_ids_list) in zip(probs_list_list, bert_ids_list_list):
+            # len(probs_list) / len(bert_ids_list): 17 / 13
+            best_bert_ids = []
+            for i in range(len(bert_ids_list)):
+                bert_ids = bert_ids_list[i]
+                bert_ids_probs = np.take(a=probs_list[i+1],
+                                         indices=bert_ids)
+                best_bert_id_index = np.argmax(a=bert_ids_probs)
+                best_bert_id = bert_ids[best_bert_id_index]
+                best_bert_ids.append(best_bert_id)
+            most_likely_sentences.append(self._tokenizer.decode(token_ids=best_bert_ids,
+                                                                skip_special_tokens=True).replace(' ', ''))
+        return np.array(most_likely_sentences)
+
+        """
         mask_positions_list = []
         for inp_ids in input_ids:
             mask_positions = self._get_mask_positions(input_ids=inp_ids)
@@ -106,6 +136,7 @@ class NlpEntity(AbstractEntity):
             most_likely_sentences.append(self._tokenizer.decode(token_ids=inp_ids,
                                                                 skip_special_tokens=True).replace(' ', ''))
         return np.array(most_likely_sentences)
+        """
 
     def _get_probs_list(self, logits, mask_positions):
         probs_list = []
@@ -142,20 +173,22 @@ class NlpEntity(AbstractEntity):
 
     def _get_similar_text_obj(self, sentences):
         masked_sentence = []
-        similarity_bert_ids_list = []
+        bert_ids_list = []
         sent = [list(sentence) for sentence in sentences]
         arr = np.array(sent)
         for (i, char_) in enumerate(arr[0]):
             if np.all(arr[:, i] == char_):
                 masked_sentence.append(char_)
+                bert_ids = self._get_bert_ids(char_)
+                bert_ids_list.append(bert_ids)
             else:
+                masked_sentence.append('[MASK]')
                 similarity_bert_ids = self._get_similarity_bert_ids(
                     chars=arr[:, i])
-                similarity_bert_ids_list.append(similarity_bert_ids)
-                masked_sentence.append('[MASK]')
+                bert_ids_list.append(similarity_bert_ids)
         return {'sentences': sentences,
                 'masked_sentence': ''.join(masked_sentence),
-                'similarity_bert_ids_list': similarity_bert_ids_list}
+                'bert_ids_list': bert_ids_list}
 
     def _get_similarity_bert_ids(self, chars):
         similarity_bert_ids = set()
@@ -165,6 +198,17 @@ class NlpEntity(AbstractEntity):
             similarity_bert_ids.update(
                 self._char_to_similarity_bert_ids[char_])
         return list(similarity_bert_ids)
+
+    def _get_bert_ids(self, char):
+        bert_ids = []
+        if char in self._token_id_mapping:
+            bert_ids.append(self._token_id_mapping.get(char))
+        char_tmp = f'##{char}'
+        if char_tmp in self._token_id_mapping:
+            bert_ids.append(self._token_id_mapping.get(char_tmp))
+        if len(bert_ids) <= 0:
+            bert_ids.append(self._tokenizer.unk_token_id)
+        return bert_ids
 
     def _split_list_if_different_too_much(self, sentences):
         result = []
@@ -247,5 +291,5 @@ if __name__ == '__main__':
                                           '轉客服轉接客服的轉接信用卡專員',
                                           '轉客服轉接客服轉接到信用卡專員',
                                           '我轉客服轉接客服的轉接信用卡專員'])
-    answer = nlp_entity.get_answer()
+    answer = nlp_entity.get_answer_v2()
     print(answer)
