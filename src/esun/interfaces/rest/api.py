@@ -3,11 +3,11 @@ import sys
 import json
 
 from absl import logging
-from esun.application.image_service import ImageService
+from esun.application.nlp_service import NlpService
 from flask import Blueprint, jsonify, request
 
 bp = Blueprint('api', __name__, url_prefix='')
-image_service = ImageService()
+nlp_service = NlpService()
 
 
 @bp.route('/inference', methods=['POST'])
@@ -16,8 +16,8 @@ def inference():
     data = request.get_json(force=True)
     logging.info(json.dumps(data))
     try:
-        resp = image_service.get_response(esun_uuid=data['esun_uuid'],
-                                          image_64_encoded=data['image'])
+        resp = nlp_service.get_response(esun_uuid=data['esun_uuid'],
+                                        sentence_list=data['sentence_list'])
     except:
         logging.exception(sys.exc_info()[0])
     output = jsonify(resp)
