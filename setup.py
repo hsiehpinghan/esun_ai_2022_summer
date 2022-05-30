@@ -7,6 +7,7 @@ setup(
     install_requires=[
         'absl-py==1.0.0',
         'scipy==1.4.1',
+        'gunicorn==20.1.0',
         'Flask==2.0.3',
         'Flask-Caching==1.11.1',
         'redis==3.5.3',

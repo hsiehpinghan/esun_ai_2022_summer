@@ -45,8 +45,10 @@ class NlpEntity(AbstractEntity):
         if len(similar_text_objs) > 0:
             most_likely_sentences_list = self._get_most_likely_sentences_func(model=self._models,
                                                                               similar_text_objs=similar_text_objs)
-        sentence_list = list(
-            set(sentence_list+list(most_likely_sentences_list.flatten())))
+            sentence_list = list(
+                set(sentence_list+list(most_likely_sentences_list.flatten())))
+        else:
+            sentence_list = list(set(sentence_list))
         sorted_text_objs_list = self._get_sorted_text_objs_func(model=self._models,
                                                                 texts=sentence_list,
                                                                 token_id_mapping=NlpEntity._token_id_mapping)

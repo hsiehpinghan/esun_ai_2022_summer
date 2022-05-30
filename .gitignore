@@ -2,6 +2,5 @@
 *.egg-info
 /bin/
 *-checkpoint.ipynb
-/data/
 /model/
 /log/

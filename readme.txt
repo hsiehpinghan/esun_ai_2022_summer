@@ -18,6 +18,7 @@ conda activate esun_ai_2022_summer
 pip install --upgrade pip
 pip install absl-py==1.0.0
 pip install scipy==1.4.1
+pip install gunicorn==20.1.0
 pip install Flask==2.0.3
 pip install Flask-Caching==1.11.1
 pip install redis==3.5.3
@@ -42,7 +43,8 @@ export CAPTAIN_EMAIL=thank.hsiehpinghan@gmail.com
 export SALT=671224
 export MODEL_DIR=/home/hsiehpinghan/git/esun_ai_2022_summer/model
 export DATA_DIR=/home/hsiehpinghan/git/esun_ai_2022_summer/data
-flask run >> /tmp/esun_ai_2022_summer.log 2>&1
+cd /home/hsiehpinghan/git/esun_ai_2022_summer/src
+gunicorn --workers=4 --bind=0.0.0.0:5000 app:app > /tmp/esun_ai_2022_summer.log 2>&1
 curl -v -X POST -H "Content-Type: application/json" -d @/home/hsiehpinghan/git/esun_ai_2022_summer/data/request.json http://localhost:5000/inference -w %{time_connect}:%{time_starttransfer}:%{time_total}
 
 # kill app
@@ -54,11 +56,7 @@ pip uninstall esun-ai-2022-summer
 
 # build docker image
 cd /home/hsiehpinghan/git/esun_ai_2022_summer
-docker image build -t hsiehpinghan/esun_ai_2022_summer:2.0.0 .
-
-# push to docker hub
-docker login
-docker push hsiehpinghan/esun_ai_2022_summer:2.0.0
+docker image build -t hsiehpinghan/esun_ai_2022_summer:3.0.0 .
 
 # run local api container
 mkdir -p /tmp/redis/data
@@ -82,10 +80,50 @@ docker run --name esun_ai_2022_summer \
   -p 10180:5000 \
   -v /tmp/log_0:/log \
   --link redis:redis \
-  -td hsiehpinghan/esun_ai_2022_summer:2.0.0
+  -td hsiehpinghan/esun_ai_2022_summer:3.0.0
 curl -v -X POST -H "Content-Type: application/json" -d @/home/hsiehpinghan/git/esun_ai_2022_summer/data/request.json http://localhost:10180/inference -w %{time_connect}:%{time_starttransfer}:%{time_total}
 
+# push to docker hub
+docker login
+docker push hsiehpinghan/esun_ai_2022_summer:3.0.0
+
 # run gcp container
+## Machine type: n1-highcpu-8 (8 vCPU, 8 GB memory)
+## Boot disk: 50 GB
+sudo apt-get install \
+     ca-certificates \
+     curl \
+     gnupg \
+     lsb-release
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo usermod -aG docker thank_hsiehpinghan
+newgrp docker
+mkdir -p /tmp/redis/data
+docker run --name redis \
+  --restart=always \
+  -p 6379:6379 \
+  -v /tmp/redis/data:/data \
+  -itd \
+  redis:6.2.4 redis-server --appendonly yes
+sudo mkdir -p /log/log_0
+docker login
+docker run --name esun_ai_2022_summer_0 \
+  --restart=always \
+  -e "TZ=Asia/Taipei" \
+  -p 10180:5000 \
+  -v /log/log_0:/log \
+  --link redis:redis \
+  -td hsiehpinghan/esun_ai_2022_summer:3.0.0
+curl -v -X POST -H "Content-Type: application/json" -d '{"esun_uuid": "add61efb7e8d9268b972b95b6fa53db93780b6b22fbf","esun_timestamp": 1590493849,"sentence_list": ["喂 你好 密碼 我 要 進去","喂 你好 密碼 哇 進去","喂 你好 密碼 的 話 進去","喂 您好 密碼 我 要 進去","喂 你好 密碼 無法 進去","喂 你好 密碼 waa 進去","喂 你好 密碼 while 進去","喂 你好 密碼 文化 進去","喂 你好 密碼 挖 進去","喂 您好 密碼 哇 進去"],"phoneme_sequence_list": ["w eI4 n i:3 x aU4 m i:4 m A:3 w O:3 j aU1 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 w A:1 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 t ax5 x w A:4 ts6 j ax n4 ts6_h y4","w eI4 n j ax n2 x aU4 m i:4 m A:3 w O:3 j aU1 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 u:2 f A:4 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 W AA1 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 W AY1 L ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 w ax n2 x w A:4 ts6 j ax n4 ts6_h y4","w eI4 n j ax n2 x aU4 m i:4 m A:3 w A:1 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 W IH1 L ts6 j ax n4 ts6_h y4"],"retry": 2}' http://localhost:10180/inference -w %{time_connect}:%{time_starttransfer}:%{time_total}
+curl -v -X POST -H "Content-Type: application/json" -d @/home/hsiehpinghan/git/esun_ai_2022_summer/data/request.json http://35.194.149.173:10180/inference -w %{time_connect}:%{time_starttransfer}:%{time_total}
+
+# run gcp container with GPU
 ## GPU type: NVIDIA Tesla T4
 ## Machine type: n1-highcpu-8 (8 vCPU, 7.2 GB memory)
 ## enable docker gpu (https://www.howtogeek.com/devops/how-to-use-an-nvidia-gpu-with-docker-containers/)
@@ -106,6 +144,6 @@ docker run --name esun_ai_2022_summer_0 \
   -p 10180:5000 \
   -v /log/log_0:/log \
   --link redis:redis \
-  -td hsiehpinghan/esun_ai_2022_summer:2.0.0
+  -td hsiehpinghan/esun_ai_2022_summer:3.0.0
 curl -v -X POST -H "Content-Type: application/json" -d '{"esun_uuid": "add61efb7e8d9268b972b95b6fa53db93780b6b22fbf","esun_timestamp": 1590493849,"sentence_list": ["喂 你好 密碼 我 要 進去","喂 你好 密碼 哇 進去","喂 你好 密碼 的 話 進去","喂 您好 密碼 我 要 進去","喂 你好 密碼 無法 進去","喂 你好 密碼 waa 進去","喂 你好 密碼 while 進去","喂 你好 密碼 文化 進去","喂 你好 密碼 挖 進去","喂 您好 密碼 哇 進去"],"phoneme_sequence_list": ["w eI4 n i:3 x aU4 m i:4 m A:3 w O:3 j aU1 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 w A:1 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 t ax5 x w A:4 ts6 j ax n4 ts6_h y4","w eI4 n j ax n2 x aU4 m i:4 m A:3 w O:3 j aU1 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 u:2 f A:4 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 W AA1 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 W AY1 L ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 w ax n2 x w A:4 ts6 j ax n4 ts6_h y4","w eI4 n j ax n2 x aU4 m i:4 m A:3 w A:1 ts6 j ax n4 ts6_h y4","w eI4 n i:3 x aU4 m i:4 m A:3 W IH1 L ts6 j ax n4 ts6_h y4"],"retry": 2}' http://localhost:10180/inference -w %{time_connect}:%{time_starttransfer}:%{time_total}
 curl -v -X POST -H "Content-Type: application/json" -d @/home/hsiehpinghan/git/esun_ai_2022_summer/data/request.json http://35.194.149.173:10180/inference -w %{time_connect}:%{time_starttransfer}:%{time_total}

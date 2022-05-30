@@ -11,5 +11,6 @@ ADD ./src/app.py /app.py
 ADD ./src/cache.py /cache.py
 ADD ./setup.py /
 RUN pip install -e /
+WORKDIR /src
 ADD ./model /model
-CMD flask run --host=0.0.0.0 >> /log/esun_ai_2022_summer.log 2>&1
+CMD gunicorn --workers=4 --bind=0.0.0.0:5000 app:app > /tmp/esun_ai_2022_summer.log 2>&1
