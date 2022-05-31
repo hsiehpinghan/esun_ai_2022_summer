@@ -101,7 +101,7 @@ class NlpEntity(AbstractEntity):
                         scores.append(1)
                     else:
                         scores.append(0)
-                if np.average(scores) > 0.5:
+                if np.average(scores) > 0.7:
                     result[-1].append(sentence_infos_tmp.pop(i))
         return result
 
