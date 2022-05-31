@@ -1,3 +1,5 @@
+import re
+import copy
 import torch
 import numpy as np
 
@@ -16,133 +18,43 @@ class Id(AbstractId):
 
 
 class NlpEntity(AbstractEntity):
-    _token_id_mapping = Util.get_token_id_mapping()
-    _convert_to_text_objs_func = Util.get_convert_to_text_objs_func()
-    _add_masked_infos_func = Util.get_add_masked_infos_func()
-    _tokenizer = Util.get_tokenizer()
-    _device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-    _models = Util.get_models()
-    _get_mask_position_func = Util.get_get_mask_position_func()
-    _get_probs_func = Util.get_get_probs_func()
-    _add_text_correct_prob_func = Util.get_add_text_correct_prob_func()
-    _is_char_equal_func = Util.get_is_char_equal_func()
     _char_to_similarity_bert_ids = Util.get_char_to_similarity_bert_ids()
 
     def __init__(self, id: str, sentence_list: List[str], batch_size: int = 128) -> None:
         super().__init__(id=Id(value=id))
         self._sentence_list = sentence_list
-        self._batch_size = batch_size
-        self._get_sorted_text_objs_func = np.vectorize(pyfunc=self._get_sorted_text_objs,
-                                                       signature='(),(n),()->()')
-        self._get_most_likely_sentences_func = np.vectorize(pyfunc=self._get_most_likely_sentences,
-                                                            signature='(),(n)->(n)')
 
     def get_answer(self) -> str:
-        sentence_list = [sentence.replace(' ', '')
+        sentence_objs = [{'sentence': sentence}
                          for sentence in self._sentence_list]
-        similar_text_objs = self._get_similar_text_objs(
-            sentence_list=sentence_list)
-        if len(similar_text_objs) > 0:
-            most_likely_sentences_list = self._get_most_likely_sentences_func(model=self._models,
-                                                                              similar_text_objs=similar_text_objs)
-            sentence_list = list(
-                set(sentence_list+list(most_likely_sentences_list.flatten())))
-        else:
-            sentence_list = list(set(sentence_list))
-        sorted_text_objs_list = self._get_sorted_text_objs_func(model=self._models,
-                                                                texts=sentence_list,
-                                                                token_id_mapping=NlpEntity._token_id_mapping)
-        text_correct_probs_mapping = {}
-        for sorted_text_objs in sorted_text_objs_list:
-            for sorted_text_obj in sorted_text_objs:
-                text = sorted_text_obj['text']
-                text_correct_prob = sorted_text_obj['text_correct_prob']
-                if text not in text_correct_probs_mapping:
-                    text_correct_probs_mapping[text] = []
-                text_correct_probs_mapping[text].append(text_correct_prob)
-        text_average_correct_prob_mapping = {text: np.average(
-            a=text_correct_probs_mapping[text]) for text in text_correct_probs_mapping}
+        self._add_chinese_only_sentence(sentence_objs=sentence_objs)
+        self._add_no_auxiliary_word_sentence(sentence_objs=sentence_objs)
+        pred_sentence = self._get_pred_sentence(sentence_objs=sentence_objs)
+        return pred_sentence
 
-        answer = sorted(text_average_correct_prob_mapping.items(),
-                        key=lambda x: x[1],
-                        reverse=True)[0][0]
-
-        return answer
-
-    def _get_most_likely_sentences(self, model, similar_text_objs):
-        most_likely_sentences = []
-        masked_sentences = [similar_text_obj['masked_sentence']
-                            for similar_text_obj in similar_text_objs]
-        inputs = self._get_inputs(masked_texts=masked_sentences)
-        input_ids = inputs['input_ids'].to(self._device)
-        attention_mask = inputs['attention_mask'].to(self._device)
-        assert len(input_ids) == len(attention_mask)
-        with torch.no_grad():
-            outputs = model(input_ids=input_ids,
-                            attention_mask=attention_mask,
-                            labels=input_ids)
-        (_, logits_list) = outputs[:]
-        input_ids = input_ids.cpu()
-        attention_mask = attention_mask.cpu()
-        logits_list = logits_list.cpu().numpy()
-        mask_positions_list = []
-        for inp_ids in input_ids:
-            mask_positions = self._get_mask_positions(input_ids=inp_ids)
-            mask_positions_list.append(mask_positions)
-        assert len(input_ids) == len(logits_list) == len(
-            mask_positions_list) == len(similar_text_objs)
-        for (inp_ids, logits, mask_positions, similar_text_obj) in zip(input_ids, logits_list, mask_positions_list, similar_text_objs):
-            probs_list = self._get_probs_list(logits, mask_positions)
-            assert len(mask_positions) == len(probs_list) == len(
-                similar_text_obj['similarity_bert_ids_list'])
-            for (mask_position, probs, similarity_bert_ids) in zip(mask_positions, probs_list, similar_text_obj['similarity_bert_ids_list']):
-                if len(similarity_bert_ids) > 0:
-                    similarity_bert_ids_probs = np.take(a=probs,
-                                                        indices=similarity_bert_ids)
-                    most_similarity_index = np.argmax(
-                        a=similarity_bert_ids_probs)
-                    most_similarity_bert_id = similarity_bert_ids[most_similarity_index]
-                else:
-                    most_similarity_bert_id = self._tokenizer.unk_token_id
-                inp_ids[mask_position] = most_similarity_bert_id
-            most_likely_sentences.append(self._tokenizer.decode(token_ids=inp_ids,
-                                                                skip_special_tokens=True).replace(' ', ''))
-        return np.array(most_likely_sentences)
-
-    def _get_probs_list(self, logits, mask_positions):
-        probs_list = []
-        for mask_position in mask_positions:
-            probs = softmax(x=logits[mask_position])
-            probs_list.append(probs)
-        return probs_list
-
-    def _get_mask_positions(self, input_ids):
-        return np.where(input_ids == self._tokenizer.mask_token_id)[0]
-
-    def _get_similar_text_objs(self, sentence_list):
+    def _get_pred_sentence(self, sentence_objs):
         sentences_dict = defaultdict(list)
-        for sentence in sentence_list:
-            sentences_dict[len(sentence)].append(sentence)
-        sentences_list = sentences_dict.values()
-        # filter len < 0
-        sentences_list = [
-            sentences for sentences in sentences_list if len(sentences) > 1]
+        for (i, sentence_obj) in enumerate(sentence_objs):
+            no_auxiliary_word_sentence = sentence_obj['no_auxiliary_word_sentence']
+            sentences_dict[len(no_auxiliary_word_sentence)].append({'sentence_index': i,
+                                                                    'no_auxiliary_word_sentence': no_auxiliary_word_sentence})
         # split list if different too much
-        sentences_list_similar = []
-        for sentences in sentences_list:
-            sentences_list_similar += self._split_list_if_different_too_much(
-                sentences=sentences)
-        # filter len < 0
-        similar_text_objs = []
-        sentences_list_similar = [
-            sentences for sentences in sentences_list_similar if len(sentences) > 1]
-        for sentences_similar in sentences_list_similar:
-            similar_text_obj = self._get_similar_text_obj(
-                sentences=sentences_similar)
-            similar_text_objs.append(similar_text_obj)
-        return similar_text_objs
+        sentence_infos_list = []
+        for sentence_length in sentences_dict:
+            sentence_infos = self._split_list_if_different_too_much(
+                sentences_dict[sentence_length])
+            for sentence_info in sentence_infos:
+                sentence_infos_list.append(sentence_info)
+        masked_sentence_infos = []
+        for sentence_infos in sentence_infos_list:
+            masked_sentence_info = self._get_masked_sentence_info(
+                sentence_infos=sentence_infos)
+            masked_sentence_infos.append(masked_sentence_info)
+        print(masked_sentence_infos)
 
-    def _get_similar_text_obj(self, sentences):
+    def _get_masked_sentence_info(self, sentence_infos):
+        sentences = [sentence_info['no_auxiliary_word_sentence']
+                     for sentence_info in sentence_infos]
         masked_sentence = []
         similarity_bert_ids_list = []
         sent = [list(sentence) for sentence in sentences]
@@ -155,99 +67,77 @@ class NlpEntity(AbstractEntity):
                     chars=arr[:, i])
                 similarity_bert_ids_list.append(similarity_bert_ids)
                 masked_sentence.append('[MASK]')
-        return {'sentences': sentences,
-                'masked_sentence': ''.join(masked_sentence),
+        return {'masked_sentence': ''.join(masked_sentence),
                 'similarity_bert_ids_list': similarity_bert_ids_list}
 
     def _get_similarity_bert_ids(self, chars):
         similarity_bert_ids = set()
         for char_ in chars:
-            if char_ not in self._char_to_similarity_bert_ids:
+            if char_ not in NlpEntity._char_to_similarity_bert_ids:
                 continue
             similarity_bert_ids.update(
-                self._char_to_similarity_bert_ids[char_])
+                NlpEntity._char_to_similarity_bert_ids[char_])
         return list(similarity_bert_ids)
 
-    def _split_list_if_different_too_much(self, sentences):
+    def _is_char_equal(self, char_0, char_1):
+        return 1 if char_0 == char_1 else 0
+
+    def _split_list_if_different_too_much(self, sentence_infos):
         result = []
-        sentences_tmp = sentences.copy()
-        while len(sentences_tmp) > 0:
-            main_ele = sentences_tmp.pop(-1)
-            result.append([main_ele])
-            for i in range(len(sentences_tmp)-1, -1, -1):
-                is_char_equals = self._is_char_equal_func(char_0=list(main_ele),
-                                                          char_1=list(sentences_tmp[i]))
-                if np.average(is_char_equals) > 0.8:
-                    result[-1].append(sentences_tmp.pop(i))
+        # {'sentence_index': i,
+        # 'no_auxiliary_word_sentence': no_auxiliary_word_sentence}
+        sentence_infos_tmp = copy.deepcopy(x=sentence_infos)
+        while len(sentence_infos_tmp) > 0:
+            main_sentence_info = sentence_infos_tmp.pop(-1)
+            main_no_auxiliary_word_sentence = main_sentence_info['no_auxiliary_word_sentence']
+            result.append([main_sentence_info])
+            for i in range(len(sentence_infos_tmp)-1, -1, -1):
+                no_auxiliary_word_sentence = sentence_infos_tmp[i]['no_auxiliary_word_sentence']
+                assert len(main_no_auxiliary_word_sentence) == len(
+                    no_auxiliary_word_sentence)
+                scores = []
+                for (char_0, char_1) in zip(list(main_no_auxiliary_word_sentence), list(no_auxiliary_word_sentence)):
+                    if char_0 == char_1:
+                        scores.append(1)
+                    else:
+                        scores.append(0)
+                if np.average(scores) > 0.5:
+                    result[-1].append(sentence_infos_tmp.pop(i))
         return result
 
-    def _get_sorted_text_objs(self, model, texts, token_id_mapping):
-        text_objs = self._convert_to_text_objs_func(text=texts)
-        self._add_masked_infos_func(text_obj=text_objs)
-        masked_texts = self._get_masked_texts(text_objs=text_objs)
-        inputs = self._get_inputs(masked_texts=masked_texts)
-        input_ids = inputs['input_ids']
-        attention_mask = inputs['attention_mask']
-        assert len(input_ids) == len(attention_mask)
-        sub_probs_lists = []
-        for i in range(0, len(input_ids), self._batch_size):
-            sub_input_ids = input_ids[i:i+self._batch_size].to(self._device)
-            sub_attention_mask = attention_mask[i:i +
-                                                self._batch_size].to(self._device)
-            with torch.no_grad():
-                sub_outputs = model(input_ids=sub_input_ids,
-                                    attention_mask=sub_attention_mask,
-                                    labels=sub_input_ids)
-            (_, sub_logits_list) = sub_outputs[:]
-            sub_input_ids = sub_input_ids.cpu()
-            sub_attention_mask = sub_attention_mask.cpu()
-            sub_logits_list = sub_logits_list.cpu().numpy()
-            sub_mask_positions = self._get_mask_position_func(
-                input_ids=sub_input_ids)
-            sub_probs_list = self._get_probs_func(logits=sub_logits_list,
-                                                  mask_position=sub_mask_positions)
-            sub_probs_lists.append(sub_probs_list)
-        probs_list = np.concatenate(sub_probs_lists,
-                                    axis=0)
-        masked_text_probs_mapping = {masked_text: probs for (
-            masked_text, probs) in zip(masked_texts, probs_list)}
-        self._add_text_correct_prob_func(text_obj=text_objs,
-                                         masked_text_probs_mapping=masked_text_probs_mapping,
-                                         token_id_mapping=token_id_mapping)
-        sorted_text_objs = sorted(text_objs,
-                                  key=lambda text_obj: text_obj['text_correct_prob'],
-                                  reverse=True)
-        return sorted_text_objs
+    def _add_chinese_only_sentence(self, sentence_objs):
+        for sentence_obj in sentence_objs:
+            sentence_obj['chinese_only_sentence'] = re.sub(pattern='([^\u4e00-\u9fa5])+',
+                                                           repl='',
+                                                           string=sentence_obj['sentence'])
 
-    def _get_masked_texts(self, text_objs):
-        masked_texts = list(set([masked_info['masked_text']
-                            for text_obj in text_objs for masked_info in text_obj['masked_infos']]))
-        return masked_texts
-
-    def _get_inputs(self, masked_texts):
-        batch_encoding = self._tokenizer.batch_encode_plus(batch_text_or_text_pairs=masked_texts,
-                                                           add_special_tokens=True,
-                                                           padding=True,
-                                                           return_tensors='pt')
-        input_ids = batch_encoding['input_ids']
-        assert len(input_ids) == len(masked_texts)
-        attention_mask = batch_encoding['attention_mask']
-        assert len(attention_mask) == len(masked_texts)
-        return {'input_ids': input_ids,
-                'attention_mask': attention_mask}
+    def _add_no_auxiliary_word_sentence(self, sentence_objs):
+        auxiliary_words = {'哉', '喂', '嘛', '了', '蛤', '呵', '哪', '嗯', '啊', '耶', '欸',
+                           '吧', '矣', '呀', '的', '哇', '喔', '歟', '嗎', '啦', '呢', '呃'}
+        for sentence_obj in sentence_objs:
+            auxiliary_chars = []
+            normal_chars = []
+            for (i, char_) in enumerate(sentence_obj['chinese_only_sentence']):
+                if char_ in auxiliary_words:
+                    auxiliary_chars.append((i, char_))
+                else:
+                    normal_chars.append((i, char_))
+            sentence_obj['auxiliary_chars'] = auxiliary_chars
+            sentence_obj['no_auxiliary_word_sentence'] = ''.join(
+                [char_ for (i, char_) in normal_chars])
 
 
 if __name__ == '__main__':
     nlp_entity = NlpEntity(id='my_id',
-                           sentence_list=['轉客服轉接客服接信用卡專員',
-                                          '轉克服轉接克服接信用卡專員',
-                                          '轉客服轉接客服直接信用卡專員',
-                                          '轉客服轉接客服轉接信用卡專員',
-                                          '轉克服轉接客服轉接信用卡專員',
-                                          '轉克服轉接客服的轉接信用卡專員',
-                                          '我轉客服轉接客服轉接信用卡專員',
-                                          '轉客服轉接客服的轉接信用卡專員',
-                                          '轉客服轉接客服轉接到信用卡專員',
-                                          '我轉客服轉接客服的轉接信用卡專員'])
+                           sentence_list=['可能 導致 不是 泡沫 再現',
+                                          '可能 導致 不是 泡沫 在線',
+                                          '可能 導致 不是 泡沫 再 見',
+                                          '可能 導致 不是 泡沫 在 現',
+                                          '可能 導致 不 是 泡沫 再現',
+                                          '可能 導致 不是 泡沫 在 見',
+                                          '可能 導致 不是 泡沫 在 限',
+                                          '可能 導致 不 是 泡沫 在線',
+                                          '可能 導致 不是 泡沫 在 線',
+                                          '可能 導致 股市 泡沫 再現'])
     answer = nlp_entity.get_answer()
     print(answer)
