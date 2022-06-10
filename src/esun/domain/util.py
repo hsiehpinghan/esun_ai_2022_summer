@@ -5,16 +5,23 @@ import torch
 import numpy as np
 
 from absl import logging
-from transformers import AutoTokenizer
-from transformers import ElectraForMaskedLM
-from scipy.special import softmax
+from transformers import BertTokenizer
+from transformers import BertForMaskedLM
 
 
 class Util:
 
     @classmethod
-    def get_char_to_similarity_bert_ids(cls):
-        with open(file=os.path.join(os.environ['DATA_DIR'], 'char_to_similarity_bert_ids.json'),
-                  mode='r') as f:
-            char_to_similarity_bert_ids = json.load(fp=f)
-        return char_to_similarity_bert_ids
+    def get_tokenizer(cls):
+        tokenizer = BertTokenizer.from_pretrained(
+            pretrained_model_name_or_path=os.environ['MODEL_DIR'])
+        return tokenizer
+
+    @classmethod
+    def get_model(cls):
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        logging.set_verbosity(logging.INFO)
+        logging.info(f'using device({device}).')
+        model = BertForMaskedLM.from_pretrained(
+            pretrained_model_name_or_path=os.environ['MODEL_DIR']).to(device)
+        return model
