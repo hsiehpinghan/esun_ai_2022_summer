@@ -28,3 +28,10 @@ class Util:
         model = EnsembleModel(pretrained_model_name_or_paths=sub_models,
                               device=device)
         return model
+
+    @classmethod
+    def get_char_to_similarity_bert_ids(cls):
+        with open(file=os.path.join(os.environ['DATA_DIR'], 'char_to_similarity_bert_ids.json'),
+                  mode='r') as f:
+            char_to_similarity_bert_ids = json.load(fp=f)
+        return char_to_similarity_bert_ids

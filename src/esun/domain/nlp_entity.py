@@ -1,5 +1,6 @@
 import re
 import torch
+import numpy as np
 import operator
 
 from typing import List
@@ -19,17 +20,122 @@ class NlpEntity(AbstractEntity):
     _device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     _tokenizer = Util.get_tokenizer()
     _model = Util.get_model()
+    _char_to_similarity_bert_ids = Util.get_char_to_similarity_bert_ids()
 
-    def __init__(self, id: str, sentence_list: List[str], batch_size: int = 16) -> None:
+    def __init__(self, id: str, sentence_list: List[str]) -> None:
         super().__init__(id=Id(value=id))
         self._sentence_list = sentence_list
 
     def get_answer(self) -> str:
         chinese_only_sentences = self._get_chinese_only_sentences(
             sentences=self._sentence_list)
-        answer = self._get_predict_sentence(
-            chinese_only_sentences=chinese_only_sentences)
+        sentences_list_similar = self._get_sentences_list_similar(
+            sentence_list=chinese_only_sentences)
+        sentences_similar = self._get_sentences_similar(
+            sentences_list_similar=sentences_list_similar)
+        similarity_bert_ids_list = self._get_similarity_bert_ids_list(
+            sentences_similar=sentences_similar)
+        answer = self._get_predict_sentence(sentences_similar=sentences_similar,
+                                            similarity_bert_ids_list=similarity_bert_ids_list)
         return answer
+
+    def _get_most_possible_sentences(self, sentences_similar, similarity_bert_ids_list):
+        with torch.no_grad():
+            probs_list = self._model(**self._tokenizer(sentences_similar,
+                                                       padding=True,
+                                                       return_tensors='pt').to(self._device))
+        result = []
+        assert len(probs_list) == len(
+            sentences_similar), f'{len(probs_list)} / {len(sentences_similar)}'
+        assert len(probs_list) == len(
+            similarity_bert_ids_list), f'{len(probs_list)} / {len(similarity_bert_ids_list)}'
+        for (probs, sentence_similar, similarity_bert_ids) in zip(probs_list, sentences_similar, similarity_bert_ids_list):
+            assert len(sentence_similar) <= (
+                len(probs)-2), f'{len(sentence_similar)} / {len(probs)-2}'
+            chars = []
+            ps = []
+            for (i, char_) in enumerate(sentence_similar):
+                if i not in similarity_bert_ids:
+                    chars.append(char_)
+                else:
+                    similarity_bert_id = similarity_bert_ids[i][torch.argmax(
+                        probs[[i+1], similarity_bert_ids[i]])]
+
+                    # if char_ == '銀':
+                    #    print(char_, similarity_bert_id, similarity_bert_ids[i])
+
+                    char_ = self._tokenizer.decode(similarity_bert_id)
+                    ps.append(probs[[i+1], similarity_bert_id].cpu().numpy())
+                    chars.append(char_)
+            result.append((''.join(chars), np.average(ps)))
+        return sorted(result,
+                      key=lambda x: x[1],
+                      reverse=True)
+
+    def _get_predict_sentence(self, sentences_similar, similarity_bert_ids_list):
+        most_possible_sentences = self._get_most_possible_sentences(sentences_similar=sentences_similar,
+                                                                    similarity_bert_ids_list=similarity_bert_ids_list)
+        return most_possible_sentences[0][0]
+
+    def _get_similarity_bert_ids_list(self, sentences_similar):
+        similarity_bert_ids_list = [{} for _ in sentences_similar]
+        for (sentence_index, sentence_similar) in enumerate(sentences_similar):
+            for (char_index, diff_char) in enumerate(sentence_similar):
+                if diff_char not in self._char_to_similarity_bert_ids:
+                    similarity_bert_ids_list[sentence_index][sentence_similar] = [
+                        1723]
+                    print(
+                        f'diff_char({diff_char}) not in similarity_bert_ids_list !!!')
+                    continue
+                similarity_bert_ids = self._char_to_similarity_bert_ids[diff_char]
+                similarity_bert_ids_list[sentence_index][char_index] = similarity_bert_ids
+                """
+                if diff_char == '現':
+                    print(diff_char, similarity_bert_ids)
+                    #print(i, diff_char_index)
+                    #print(similarity_bert_ids_list[i][diff_char_index])
+                """
+        return similarity_bert_ids_list
+
+    def _get_sentences_similar(self, sentences_list_similar):
+        return [sentence_similar for sentences_similar in sentences_list_similar for sentence_similar in sentences_similar]
+
+    def _get_sentences_list_similar(self, sentence_list):
+        sentences_dict = defaultdict(list)
+        for sentence in sentence_list:
+            sentences_dict[len(sentence)].append(sentence)
+        sentences_list = sentences_dict.values()
+        # filter len >= 1
+        sentences_list = [
+            sentences for sentences in sentences_list if len(sentences) >= 1]
+        # split list if different too much
+        sentences_list_similar = []
+        for sentences in sentences_list:
+            sentences_list_similar += self._split_list_if_different_too_much(
+                sentences=sentences)
+        # filter len >= 1
+        sentences_list_similar = [
+            sentences for sentences in sentences_list_similar if len(sentences) >= 1]
+        return sentences_list_similar
+
+    def _split_list_if_different_too_much(self, sentences):
+        result = []
+        sentences_tmp = sentences.copy()
+        while len(sentences_tmp) > 0:
+            main_ele = sentences_tmp.pop(-1)
+            result.append([main_ele])
+            is_char_equals = []
+            for i in range(len(sentences_tmp)-1, -1, -1):
+                assert len(main_ele) == len(sentences_tmp[i])
+                for (char_0, char_1) in zip(list(main_ele), list(sentences_tmp[i])):
+                    is_char_equals.append(self.is_char_equal(char_0=char_0,
+                                                             char_1=char_1))
+                if np.average(is_char_equals) > 0.5:
+                    result[-1].append(sentences_tmp.pop(i))
+        return result
+
+    def is_char_equal(self, char_0, char_1):
+        return 1 if char_0 == char_1 else 0
 
     def _get_chinese_only_sentences(self, sentences):
         chinese_only_sentences = []
@@ -39,16 +145,6 @@ class NlpEntity(AbstractEntity):
                                            string=sentence)
             chinese_only_sentences.append(chinese_only_sentence)
         return chinese_only_sentences
-
-    def _get_predict_sentence(self, chinese_only_sentences):
-        texts = self._get_corrected_texts(texts=chinese_only_sentences)
-        result_dict = defaultdict(int)
-        for text in texts:
-            result_dict[text[0]] += 1
-        sorted_sentences = sorted(result_dict.items(),
-                                  key=lambda x: x[1],
-                                  reverse=True)
-        return sorted_sentences[0][0]
 
     def _get_corrected_texts(self, texts):
         with torch.no_grad():
@@ -89,15 +185,15 @@ class NlpEntity(AbstractEntity):
 
 if __name__ == '__main__':
     nlp_entity = NlpEntity(id='my_id',
-                           sentence_list=['可能 導致 不是 泡沫 再現',
-                                          '可能 導致 不是 泡沫 在線',
-                                          '可能 導致 不是 泡沫 再 見',
-                                          '可能 導致 不是 泡沫 在 現',
-                                          '可能 導致 不 是 泡沫 再現',
-                                          '可能 導致 不是 泡沫 在 見',
-                                          '可能 導致 不是 泡沫 在 限',
-                                          '可能 導致 不 是 泡沫 在線',
-                                          '可能 導致 不是 泡沫 在 線',
-                                          '可能 導致 股市 泡沫 再現'])
+                           sentence_list=['並提升內部監督機制',
+                                          '並提升那不見都機制',
+                                          '並提升內部間都機制',
+                                          '並提升內部件都機制',
+                                          '並提升那不間都機制',
+                                          '並提升那不監督機制',
+                                          '並提升那部監督機制',
+                                          '並提升那布建都機制',
+                                          '並提升內不見都機制',
+                                          '並提升那不件都機制'])
     answer = nlp_entity.get_answer()
     print(answer)
