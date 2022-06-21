@@ -82,12 +82,11 @@ class NlpEntity(AbstractEntity):
         for (sentence_index, sentence_similar) in enumerate(sentences_similar):
             for (char_index, diff_char) in enumerate(sentence_similar):
                 if diff_char not in self._char_to_similarity_bert_ids:
-                    similarity_bert_ids_list[sentence_index][sentence_similar] = [
-                        1723]
-                    print(
-                        f'diff_char({diff_char}) not in similarity_bert_ids_list !!!')
-                    continue
-                similarity_bert_ids = self._char_to_similarity_bert_ids[diff_char]
+                    similarity_bert_ids = [100]
+                else:
+                    similarity_bert_ids = self._char_to_similarity_bert_ids[diff_char]
+                    if len(similarity_bert_ids) <= 0:
+                        similarity_bert_ids = [100]
                 similarity_bert_ids_list[sentence_index][char_index] = similarity_bert_ids
                 """
                 if diff_char == '現':
