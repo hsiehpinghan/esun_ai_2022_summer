@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 
 class TestApi():
-    URL = 'http://35.194.149.173:10180/inference'
+    URL = 'http://35.194.149.173:20180/inference'
     ESUN_UUID_PREFIX = '6465e4f10a0b099c44791e901efb7e8d9268b972b95b6fa53db93780b6b22fbf'
     ESUN_TIMESTAMP = 1590493849
     RETRY = 2
@@ -26,7 +26,7 @@ class TestApi():
             tasks.append(task)
             if (i + 1) % 10 == 0:
                 loop.run_until_complete(asyncio.wait(tasks))
-                # time.sleep(1)
+                time.sleep(1)
 
     async def _write_result(self, id, ground_truth_sentence, answer, start_time, end_time):
         with open('/tmp/compression_test.csv', 'a') as csv_file:
